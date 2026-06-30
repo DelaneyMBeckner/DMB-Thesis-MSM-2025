@@ -236,9 +236,18 @@ def assign_states_to_events(events_df, states_df):
     - Event times are floating point seconds from start
     - State times are integer seconds from start
     """
-    # Rename 'TKDDM_0_Numeric' column to 'state' if needed
-    if 'TKDDM_0_Numeric' in states_df.columns and 'state' not in states_df.columns:
-        states_df = states_df.rename(columns={'TKDDM_0_Numeric': 'state'})
+    # FIX: Rename the numeric state column to 'state' if it doesn't exist
+    if 'state' not in states_df.columns:
+        # Find columns that end with '_Numeric' - these contain the state values
+        numeric_columns = [col for col in states_df.columns if col.endswith('_Numeric')]
+        if numeric_columns:
+            # Use the first matching column
+            states_df = states_df.rename(columns={numeric_columns[0]: 'state'})
+            print(f"Renamed '{numeric_columns[0]}' to 'state'")
+        else:
+            print("ERROR: Could not find a numeric state column!")
+            print(f"Available columns: {states_df.columns.tolist()}")
+            return pd.DataFrame()  # Return empty dataframe
     
     # Ensure both dataframes have the time columns properly formatted as numeric
     try:
@@ -651,7 +660,6 @@ def visualize_results(counts, pivot_counts, events_with_states=None, states_df=N
             ax_hypno = fig_hypno.add_subplot(111)
             
             # Call the plot_hypnogram function with our figure and axes
-            from plot_hypnogram import plot_hypnogram  # This import would be needed in practice
             fig_hypno, ax_hypno = plot_hypnogram(states_df, STATE_LABELS, recordingID, fig=fig_hypno, ax=ax_hypno)
             
             # Store the figure in our dictionary
@@ -722,7 +730,7 @@ def generate_summary_stats(counts, pivot_counts):
 def create_normalized_visualizations(counts, pivot_counts, states_df, STATE_LABELS, recordingID="Mouse "):
     """
     Create visualizations that properly normalize event counts by state duration
-    Each epoch is exactly 5 seconds long
+    Each epoch is exactly 10 seconds long
     """
     figures = {}  # Dictionary to store the figures
     
@@ -735,8 +743,8 @@ def create_normalized_visualizations(counts, pivot_counts, states_df, STATE_LABE
     # Count epochs per state
     state_epoch_counts = states_df['state'].value_counts().sort_index()
     
-    # Calculate durations directly from epoch counts (5 seconds per epoch)
-    EPOCH_DURATION = 5  # seconds
+    # Calculate durations directly from epoch counts (10 seconds per epoch)
+    EPOCH_DURATION = 10  # seconds
     state_durations = {state: count * EPOCH_DURATION for state, count in state_epoch_counts.items()}
     
     # Create a DataFrame to store normalized data
@@ -964,21 +972,34 @@ def main(events_file, states_file, recordingID="Mouse "):
         counts, pivot_counts = count_events_per_state_per_cell(events_with_states)
         
         # Process states to ensure they're properly typed
-        # Rename 'TKDDM_0_Numeric' column to 'state' if it exists and 'state' doesn't
-        if 'TKDDM_0_Numeric' in states_df.columns and 'state' not in states_df.columns:
-            states_df = states_df.rename(columns={'TKDDM_0_Numeric': 'state'})
+        # Rename ANY numeric column to 'state' if 'state' doesn't exist
+        if 'state' not in states_df.columns:
+            # Find columns that end with '_Numeric' - these contain the state values
+            numeric_columns = [col for col in states_df.columns if col.endswith('_Numeric')]
+            if numeric_columns:
+                # Use the first matching column
+                states_df = states_df.rename(columns={numeric_columns[0]: 'state'})
+                print(f"Renamed '{numeric_columns[0]}' to 'state' in main function")
+            else:
+                print("ERROR: Could not find a numeric state column in main function!")
+                print(f"Available columns: {states_df.columns.tolist()}")
+                return None, None, None, None, None, None, None
         
         # Convert state column to numeric
         states_df['state'] = pd.to_numeric(states_df['state'], errors='coerce')
         states_df = states_df.dropna(subset=['state'])
         states_df['state'] = states_df['state'].astype(int)
         
+        # Create state_label column using STATE_LABELS mapping
+        states_df['state_label'] = states_df['state'].map(STATE_LABELS)
+        print(f"Added state_label column to states_df")
+        
         # Count epochs per state
         print("\n" + "-" * 50)
         print("STEP 4: Counting epochs per state")
         print("-" * 50)
         state_epoch_counts = states_df['state'].value_counts().sort_index()
-        EPOCH_DURATION = 5  # seconds
+        EPOCH_DURATION = 10  # seconds
         state_durations = {state: count * EPOCH_DURATION for state, count in state_epoch_counts.items()}
         
         print("\nState durations (seconds) and epoch counts:")
@@ -1006,7 +1027,7 @@ def main(events_file, states_file, recordingID="Mouse "):
     )
         
         # Return epoch counts along with other outputs
-        return counts, pivot_counts, state_totals, summary, labeled_epoch_counts, figures, normalized_pivot_second
+        return counts, pivot_counts, state_totals, summary, labeled_epoch_counts, figures, normalized_pivot_second, states_df
         
     except Exception as e:
         print(f"An error occurred during analysis: {str(e)}")

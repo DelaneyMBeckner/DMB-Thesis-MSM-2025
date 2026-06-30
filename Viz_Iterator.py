@@ -189,7 +189,7 @@ def save_outputs(animal_tag, day_tag, result, output_dir=None):
     # Save dataframes as CSV files
     dataframe_keys = [
         "counts", "pivot_counts", "state_totals", "summary", 
-        "epoch_counts", "normalized_event_counts"
+        "epoch_counts", "normalized_event_counts", "states_df"
     ]
     
     for key in dataframe_keys:
@@ -412,12 +412,12 @@ def main2(animal_tag, day_tag, Eventfile, Scorefile):
         all_results = Events_Viz.main(Eventfile, Scorefile, recordingID=recording_ID)
         
         # Handle the case where Events_Viz.main returns None or less than 7 values
-        if all_results is None or len(all_results) < 7:
+        if all_results is None or len(all_results) < 8:
             print("Error: Events_Viz.main returned incomplete results")
             return {"error": "Incomplete results from analysis", "animal_tag": animal_tag, "day_tag": day_tag}
         
         # Unpack known values with standard names
-        counts, pivot_counts, state_totals, summary, epoch_counts, figures, normalized_event_counts = all_results[:7]
+        counts, pivot_counts, state_totals, summary, epoch_counts, figures, normalized_event_counts, states_df = all_results[:8]
         
         # Prepare result dictionary with analysis outputs
         result = {
@@ -431,8 +431,15 @@ def main2(animal_tag, day_tag, Eventfile, Scorefile):
             "epoch_counts": epoch_counts,
             "figures": figures,
             "normalized_event_counts": normalized_event_counts,
+            "states_df": states_df,  # Add this line
             "status": "Success"
         }
+
+        # Add any additional return values with generic names
+        if len(all_results) > 8:  # Changed from 7 to 8
+            for i, extra_value in enumerate(all_results[8:], 1):
+                if extra_value is not None:
+                    result[f"extra_output_{i}"] = extra_value
         
         # Add any additional return values with generic names
         if len(all_results) > 7:
@@ -447,33 +454,15 @@ def main2(animal_tag, day_tag, Eventfile, Scorefile):
         traceback.print_exc()  # Print the full traceback for debugging
         return {"error": str(e), "animal_tag": animal_tag, "day_tag": day_tag}
 
-if __name__ == "__main__":
-    # Configure matplotlib to not display warnings above a higher threshold
-    plt.rcParams['figure.max_open_warning'] = 50  # Increase the warning threshold
-    
-    # Parse command line arguments
-    target_dir = None
-    output_dir = None
-    
-    # Check if we have arguments
-    if len(sys.argv) > 1:
-        # First argument is always the target directory
-        target_dir = sys.argv[1]
-        
-        # Check if we have a second argument for output directory
-        if len(sys.argv) > 2:
-            output_dir = sys.argv[2]
-    
-    # Process files with given parameters
-    process_files(target_dir, output_dir)
+
 
 if __name__ == "__main__":
     # Configure matplotlib to not display warnings above a higher threshold
     plt.rcParams['figure.max_open_warning'] = 50  # Increase the warning threshold
     
-    # Parse command line arguments
-    target_dir = None
-    output_dir = None
+    #hardcoded directories
+    target_dir = r"E:\Data_Processing\R\Data CSVs"
+    output_dir = r"E:\Data_Processing\Python\Results"
     
     # Check if we have arguments
     if len(sys.argv) > 1:

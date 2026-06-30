@@ -1,11 +1,14 @@
 # ============================================================
-# BATCH PROCESSOR: Cross-Animal Comparison (v3)
+# BATCH PROCESSOR: Cross-Animal Comparison (v2)
 # ============================================================
 # Processes multiple animals and creates comparison plots
-# v3 adds: Activity-based ROI filtering with clear labeling
+# - Separates analyses by transition type
+# - Supports trajectory analysis
 #
-# All output files include "_filtered" suffix
-# All plot titles include "(Active ROIs Only)"
+# Usage:
+#   source("Batch_Process_Animals_v2.R")
+#   # Edit configuration section below
+#   # Then run: results <- batch_process_animals()
 # ============================================================
 
 library(dplyr)
@@ -13,14 +16,14 @@ library(ggplot2)
 library(tidyr)
 
 # Load pipeline script
-source("Pipeline_Transition_Analysis_v3.R")
+source("Pipeline_Transition_Analysis_v2.R")
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
 # Animals to analyze
-ANIMALS <- c("mPFCf5", "mPFCf6", "mPFCm9", "mPFCm4")
+ANIMALS <- c("mPFCf5", "mPFCf6", "mPFCm4", "mPFCm9")
 
 # Conditions (experimental days)
 CONDITIONS <- c("BL", "SD", "WO")
@@ -29,52 +32,40 @@ CONDITIONS <- c("BL", "SD", "WO")
 TRANSITION_TYPES <- c("Wake2NREM", "NREM2Wake")
 
 # Window size (3 or 9 epochs)
-WINDOW_SIZE <- 9
+WINDOW_SIZE <- 3
 
 # Data directories
 DATA_DIR <- "E:/Data_Processing/R/Data CSVs"
 OUTPUT_DIR <- "E:/Data_Processing/R/Results"
 
 # Processing options
-SAVE_INTERMEDIATE <- TRUE
-CCF_USE_PARALLEL <- TRUE
-CCF_N_CORES <- 6
+SAVE_INTERMEDIATE <- FALSE  # Save per-animal CSVs?
+CCF_USE_PARALLEL <- TRUE   # Use parallel processing for CCF?
+CCF_N_CORES <- 6           # Number of cores for CCF
 
 # Analysis modes
-RUN_TRAJECTORY_ANALYSIS <- TRUE
-RUN_WHOLE_WINDOW <- FALSE
+RUN_TRAJECTORY_ANALYSIS <- TRUE   # Run epoch-level trajectory analysis?
+RUN_WHOLE_WINDOW <- FALSE          # Run whole-window analysis?
 
-# CCF parameters
-RUN_LAG_SWEEP <- FALSE
-MAX_LAG <- 5
+# CCF analysis parameters
+RUN_LAG_SWEEP <- FALSE     # Run lag sweep analysis? (slower)
+MAX_LAG <- 5               # Maximum lag for lag sweep (if enabled)
 
-# Distance-correlation parameters
-BINNING_METHOD <- "percentile"
-N_DISTANCE_BINS <- 10
-N_PERCENTILE_BINS <- 3
-N_TRAJECTORY_BINS <- 3
-FIT_EXPONENTIAL <- FALSE
-
-# Activity-based ROI filtering
-FILTER_BY_ACTIVITY <- TRUE
-MIN_EVENTS_BASELINE <- 1    # Minimum events required
-BASELINE_EPOCHS <- 18       # Per this many epochs (18~=1 sleep cycle)
-
-# Correlation-based pair filtering
-CORRELATION_FILTER <- "off"        # "off", "alone", or "alongside"
-CORRELATION_FILTER_METHOD <- "percentile"  # "percentile" or "outlier"
-CORRELATION_PERCENTILE <- 5       # Top X% (only used if method = "percentile")
-
-# File naming
-FILE_SUFFIX <- "_all_simple"         # Suffix for output files
+# Distance-correlation analysis parameters
+BINNING_METHOD <- "percentile"   # "equal_width", "percentile", or "both"
+N_DISTANCE_BINS <- 10      # Number of bins for equal-width binning
+N_PERCENTILE_BINS <- 5     # Number of bins for percentile binning
+N_TRAJECTORY_BINS <- 5     # Number of bins for trajectory analysis
+FIT_EXPONENTIAL <- FALSE   # Fit exponential model to distance-correlation?
 
 # Plotting options
-N_PERCENTILE_POINTS <- 100
+N_PERCENTILE_POINTS <- 100  # Number of points for continuous percentile plots
 
 # ============================================================
 # MAIN BATCH PROCESSING FUNCTION
 # ============================================================
 
+#' Process all animals and create comparison plots
 batch_process_animals <- function(animals = ANIMALS,
                                   conditions = CONDITIONS,
                                   transition_types = TRANSITION_TYPES,
@@ -93,18 +84,10 @@ batch_process_animals <- function(animals = ANIMALS,
                                   n_percentile_bins = N_PERCENTILE_BINS,
                                   n_trajectory_bins = N_TRAJECTORY_BINS,
                                   fit_exponential = FIT_EXPONENTIAL,
-                                  n_percentile_points = N_PERCENTILE_POINTS,
-                                  filter_by_activity = FILTER_BY_ACTIVITY,
-                                  min_events_baseline = MIN_EVENTS_BASELINE,
-                                  baseline_epochs = BASELINE_EPOCHS,
-                                  correlation_filter = CORRELATION_FILTER,
-                                  correlation_filter_method = CORRELATION_FILTER_METHOD,
-                                  correlation_percentile = CORRELATION_PERCENTILE,
-                                  file_suffix = FILE_SUFFIX) {
+                                  n_percentile_points = N_PERCENTILE_POINTS) {
   
   cat("====================================================\n")
-  cat("  BATCH PROCESSING v3: CROSS-ANIMAL COMPARISON\n")
-  cat("  (Activity-Filtered Analysis)\n")
+  cat("  BATCH PROCESSING: CROSS-ANIMAL COMPARISON\n")
   cat("====================================================\n")
   cat("Animals:", paste(animals, collapse = ", "), "\n")
   cat("Conditions:", paste(conditions, collapse = ", "), "\n")
@@ -112,17 +95,13 @@ batch_process_animals <- function(animals = ANIMALS,
   cat("Window size:", window_size, "epochs\n")
   cat("Trajectory analysis:", run_trajectory_analysis, "\n")
   cat("Whole window analysis:", run_whole_window, "\n")
-  if (filter_by_activity) {
-    cat("\n*** ACTIVITY FILTER ENABLED ***\n")
-    cat("Threshold:", min_events_baseline, "event(s) per", baseline_epochs, "epochs at BL\n")
-  }
   cat("Output directory:", output_dir, "\n")
   cat("====================================================\n\n")
   
   # Storage for all animal results
   all_animal_results <- list()
   
-  # Process each animal
+  # Process each animal SEQUENTIALLY (parallel happens within CCF)
   for (animal in animals) {
     cat("\n\n")
     cat("####################################################\n")
@@ -130,6 +109,7 @@ batch_process_animals <- function(animals = ANIMALS,
     cat("####################################################\n")
     
     tryCatch({
+      # Run pipeline for this animal
       animal_results <- run_animal_pipeline(
         animal_id = animal,
         conditions = conditions,
@@ -148,48 +128,33 @@ batch_process_animals <- function(animals = ANIMALS,
         n_distance_bins = n_distance_bins,
         n_percentile_bins = n_percentile_bins,
         n_trajectory_bins = n_trajectory_bins,
-        fit_exponential = fit_exponential,
-        filter_by_activity = filter_by_activity,
-        min_events_baseline = min_events_baseline,
-        baseline_epochs = baseline_epochs,
-        correlation_filter = correlation_filter,
-        correlation_filter_method = correlation_filter_method,
-        correlation_percentile = correlation_percentile,
-        file_suffix = file_suffix
+        fit_exponential = fit_exponential
       )
       
+      # Store results
       all_animal_results[[animal]] <- animal_results
       
     }, error = function(e) {
-      cat("\n!!! ERROR processing", animal, ":", conditionMessage(e), "\n")
-      cat("Continuing with remaining animals...\n\n")
+      warning("Error processing animal ", animal, ": ", e$message)
+      cat("\nSkipping", animal, "due to error\n\n")
     })
   }
   
-  cat("\n====================================================\n")
-  cat("  COMBINING RESULTS ACROSS ANIMALS\n")
-  cat("====================================================\n\n")
-  
-  # Print filtering summary
-  if (filter_by_activity) {
-    cat("FILTERING SUMMARY:\n")
-    cat("------------------\n")
-    total_original <- 0
-    total_active <- 0
-    for (animal in names(all_animal_results)) {
-      stats <- all_animal_results[[animal]]$filter_stats
-      if (!is.null(stats)) {
-        cat(sprintf("  %s: %d/%d ROIs retained (%.1f%%)\n", 
-                    animal, stats$active_rois, stats$total_rois, stats$pct_retained))
-        total_original <- total_original + stats$total_rois
-        total_active <- total_active + stats$active_rois
-      }
-    }
-    cat(sprintf("  TOTAL: %d/%d ROIs retained (%.1f%%)\n\n", 
-                total_active, total_original, 100 * total_active / total_original))
+  # Check if we have results
+  if (length(all_animal_results) == 0) {
+    stop("No animals were successfully processed!")
   }
   
-  # Combine whole-window results
+  cat("\n\n")
+  cat("====================================================\n")
+  cat("  ALL ANIMALS PROCESSED\n")
+  cat("====================================================\n")
+  cat("Successfully processed:", length(all_animal_results), "animals\n\n")
+  
+  # Combine results across animals
+  cat("Combining results across animals...\n")
+  
+  # Whole-window results
   all_event_rates <- NULL
   all_correlations <- NULL
   all_dist_corr <- NULL
@@ -199,12 +164,12 @@ batch_process_animals <- function(animals = ANIMALS,
     all_correlations <- bind_rows(lapply(all_animal_results, function(x) x$correlations))
     all_dist_corr <- bind_rows(lapply(all_animal_results, function(x) x$dist_corr))
     
-    cat("Combined whole-window data:\n")
-    cat("  Event rates:", nrow(all_event_rates), "observations\n")
-    cat("  Correlations:", nrow(all_correlations), "observations\n")
+    cat("  Total ROI-condition combinations:", nrow(all_event_rates), "\n")
+    cat("  Total pair-condition combinations:", nrow(all_correlations), "\n")
+    cat("  Total distance-correlation pairs:", nrow(all_dist_corr), "\n")
   }
   
-  # Combine trajectory results
+  # Trajectory results
   all_trajectory_data <- NULL
   all_trajectory_dist <- NULL
   all_trajectory_events <- NULL
@@ -212,78 +177,112 @@ batch_process_animals <- function(animals = ANIMALS,
   if (run_trajectory_analysis) {
     all_trajectory_data <- bind_rows(lapply(all_animal_results, function(x) x$trajectory_data))
     all_trajectory_dist <- bind_rows(lapply(all_animal_results, function(x) x$trajectory_dist))
+    
+    # Collect event rate trajectory data (if available from pipeline)
     all_trajectory_events <- bind_rows(lapply(all_animal_results, function(x) x$trajectory_events))
     
-    cat("Combined trajectory data:\n")
-    cat("  Epoch observations:", nrow(all_trajectory_data), "\n")
-    cat("  Distance-binned observations:", nrow(all_trajectory_dist), "\n")
-    if (!is.null(all_trajectory_events)) {
-      cat("  Event observations:", nrow(all_trajectory_events), "\n")
+    cat("  Total trajectory epoch observations:", nrow(all_trajectory_data), "\n")
+    cat("  Total trajectory distance-binned observations:", nrow(all_trajectory_dist), "\n")
+    if (!is.null(all_trajectory_events) && nrow(all_trajectory_events) > 0) {
+      cat("  Total trajectory event observations:", nrow(all_trajectory_events), "\n")
     }
   }
   
   cat("\n")
   
-  # Create plots
+  # Create comparison plots
   cat("Creating comparison plots...\n\n")
   
   plots <- list()
-  filter_label <- ifelse(filter_by_activity, " (Active ROIs Only)", "")
   
-  # ====== TRAJECTORY PLOTS ======
-  if (run_trajectory_analysis && !is.null(all_trajectory_data)) {
-    cat("  [TRAJECTORY PLOTS]\n")
+  # ====== WHOLE-WINDOW PLOTS (separated by transition type) ======
+  if (run_whole_window) {
+    cat("  [WHOLE-WINDOW PLOTS]\n")
     
-    # Overall trajectory
+    for (trans_type in transition_types) {
+      cat("    Processing", trans_type, "...\n")
+      
+      # Filter data for this transition type
+      event_rates_trans <- all_event_rates %>% filter(transition_type == trans_type)
+      correlations_trans <- all_correlations %>% filter(transition_type == trans_type)
+      dist_corr_trans <- all_dist_corr %>% filter(transition_type == trans_type)
+      
+      # Plot 1: Event Rate by Activity Percentile
+      plots[[paste0(trans_type, "_event_rate_percentile")]] <- create_percentile_plot(
+        data = event_rates_trans,
+        x_var = "activity_percentile",
+        y_var = "mean_event_rate",
+        title = paste(trans_type, "- Event Rate by Activity Percentile"),
+        x_lab = "Activity Percentile (within animal)",
+        y_lab = "Mean Event Rate (events/transition)",
+        n_points = n_percentile_points
+      )
+      
+      # Plot 2: Correlation by Correlation Percentile
+      plots[[paste0(trans_type, "_correlation_percentile")]] <- create_percentile_plot(
+        data = correlations_trans,
+        x_var = "correlation_percentile",
+        y_var = "mean_correlation",
+        title = paste(trans_type, "- Correlation by Correlation Percentile"),
+        x_lab = "Correlation Percentile (within animal)",
+        y_lab = "Mean Correlation",
+        n_points = n_percentile_points
+      )
+      
+      # Plot 3: Correlation by Distance Percentile
+      plots[[paste0(trans_type, "_dist_corr_percentile")]] <- create_distance_percentile_plot(
+        data = dist_corr_trans,
+        title = paste(trans_type, "- Correlation by Distance Percentile"),
+        x_lab = "Distance Percentile (within animal)",
+        y_lab = "Mean Correlation",
+        n_points = n_percentile_points
+      )
+    }
+  }
+  
+  # ====== TRAJECTORY PLOTS (separate for each transition type) ======
+  if (run_trajectory_analysis) {
+    cat("\n  [TRAJECTORY PLOTS]\n")
+    
+    # Overall trajectory comparison (combined + individual per transition type)
     cat("    Creating overall trajectory comparisons...\n")
     trajectory_overall_plots <- create_trajectory_comparison_plots(
       data = all_trajectory_data,
-      title_base = paste0("Correlation Trajectory Across Animals", filter_label),
+      title_base = "Correlation Trajectory Across Animals",
       window_size = window_size
     )
     for (plot_name in names(trajectory_overall_plots)) {
       plots[[paste0("trajectory_overall_", plot_name)]] <- trajectory_overall_plots[[plot_name]]
     }
     
-    # Animal-faceted trajectory (2x2 layout for thesis Figure 8)
-    cat("    Creating animal-faceted trajectory plots (2x2 layout)...\n")
-    trajectory_by_animal_plots <- create_trajectory_by_animal_plots(
-      data = all_trajectory_data,
-      title_base = paste0("Correlation Trajectory", filter_label),
-      window_size = window_size
-    )
-    for (plot_name in names(trajectory_by_animal_plots)) {
-      plots[[paste0("trajectory_by_animal_", plot_name)]] <- trajectory_by_animal_plots[[plot_name]]
-    }
-    
-    # Distance-binned trajectory
+    # Distance-binned trajectory comparison (combined + individual per animal/transition)
     cat("    Creating distance-binned trajectory comparisons...\n")
     trajectory_distance_plots <- create_trajectory_distance_comparison_plots(
       data = all_trajectory_dist,
-      title_base = paste0("Correlation Trajectory by Distance Bin", filter_label),
+      title_base = "Correlation Trajectory by Distance Bin",
       window_size = window_size
     )
     for (plot_name in names(trajectory_distance_plots)) {
       plots[[paste0("trajectory_by_distance_", plot_name)]] <- trajectory_distance_plots[[plot_name]]
     }
     
-    # Faceted trajectory
+    # Faceted trajectory comparison (combined + individual per distance bin/transition)
     cat("    Creating faceted trajectory comparisons...\n")
     trajectory_faceted_plots <- create_trajectory_faceted_plots(
       data = all_trajectory_dist,
-      title_base = paste0("Correlation Trajectory: Distance Bins Compared", filter_label),
+      title_base = "Correlation Trajectory: Distance Bins Compared",
       window_size = window_size
     )
     for (plot_name in names(trajectory_faceted_plots)) {
       plots[[paste0("trajectory_faceted_", plot_name)]] <- trajectory_faceted_plots[[plot_name]]
     }
     
-    # Event rate trajectory
+    # Event rate trajectory plots (if event data available)
     if (!is.null(all_trajectory_events) && nrow(all_trajectory_events) > 0) {
       cat("    Creating event rate trajectory comparisons...\n")
       event_rate_plots <- create_event_rate_trajectory_plots(
         data = all_trajectory_events,
-        title_base = paste0("Event Rate Trajectory Across Animals", filter_label),
+        title_base = "Event Rate Trajectory Across Animals",
         window_size = window_size
       )
       for (trans_type in names(event_rate_plots)) {
@@ -297,74 +296,89 @@ batch_process_animals <- function(animals = ANIMALS,
   # Save plots
   cat("Saving plots to", output_dir, "...\n")
   
-  # Ensure directory structure exists
-  create_output_directories(output_dir)
-  
-  # Get between_subject paths
-  between_subj_dir <- get_output_path(output_dir, "between_subject", NULL)
+  if (run_whole_window) {
+    for (trans_type in transition_types) {
+      ggsave(file.path(output_dir, paste0("CrossAnimal_", trans_type, "_EventRate_by_Percentile_", window_size, "ep.png")),
+             plots[[paste0(trans_type, "_event_rate_percentile")]],
+             width = 12, height = 8, dpi = 300)
+      
+      ggsave(file.path(output_dir, paste0("CrossAnimal_", trans_type, "_Correlation_by_Percentile_", window_size, "ep.png")),
+             plots[[paste0(trans_type, "_correlation_percentile")]],
+             width = 12, height = 8, dpi = 300)
+      
+      ggsave(file.path(output_dir, paste0("CrossAnimal_", trans_type, "_Correlation_by_Distance_", window_size, "ep.png")),
+             plots[[paste0(trans_type, "_dist_corr_percentile")]],
+             width = 12, height = 8, dpi = 300)
+    }
+  }
   
   if (run_trajectory_analysis) {
+    # Create output subdirectory for individual plots
+    individual_dir <- file.path(output_dir, "Individual_Plots")
+    dir.create(individual_dir, showWarnings = FALSE, recursive = TRUE)
     
-    # Combined overall plot (both transition types -> between_subject root)
+    # Overall trajectory (combined - both transition types)
     if (!is.null(plots[["trajectory_overall_combined"]])) {
-      ggsave(file.path(between_subj_dir, paste0("CrossAnimal_Trajectory_Overall_", window_size, "ep", file_suffix, ".png")),
+      ggsave(file.path(output_dir, paste0("CrossAnimal_Trajectory_Overall_", window_size, "ep.png")),
              plots[["trajectory_overall_combined"]],
              width = 14, height = 8, dpi = 300)
     }
     
     for (trans_type in transition_types) {
-      trans_dir <- get_output_path(output_dir, "between_subject", trans_type)
-      
-      # Individual overall plots
+      # Overall trajectory (individual per transition type)
       if (!is.null(plots[[paste0("trajectory_overall_", trans_type)]])) {
-        ggsave(file.path(trans_dir, paste0("CrossAnimal_", trans_type, "_Trajectory_Overall_", window_size, "ep", file_suffix, ".png")),
+        ggsave(file.path(individual_dir, paste0("CrossAnimal_", trans_type, "_Trajectory_Overall_", window_size, "ep.png")),
                plots[[paste0("trajectory_overall_", trans_type)]],
                width = 10, height = 8, dpi = 300)
       }
       
-      # Animal-faceted plots (2x2 layout - thesis Figure 8)
-      if (!is.null(plots[[paste0("trajectory_by_animal_", trans_type)]])) {
-        ggsave(file.path(trans_dir, paste0("CrossAnimal_", trans_type, "_Trajectory_ByAnimal_2x2_", window_size, "ep", file_suffix, ".png")),
-               plots[[paste0("trajectory_by_animal_", trans_type)]],
-               width = 10, height = 8, dpi = 300)
-      }
-      
-      # Distance-binned combined
+      # Distance-binned trajectory (combined faceted by animal)
       if (!is.null(plots[[paste0("trajectory_by_distance_combined_", trans_type)]])) {
-        ggsave(file.path(trans_dir, paste0("CrossAnimal_", trans_type, "_Trajectory_by_Distance_", window_size, "ep", file_suffix, ".png")),
+        ggsave(file.path(output_dir, paste0("CrossAnimal_", trans_type, "_Trajectory_by_Distance_", window_size, "ep.png")),
                plots[[paste0("trajectory_by_distance_combined_", trans_type)]],
                width = 14, height = 10, dpi = 300)
       }
       
-      # Faceted combined
+      # Faceted trajectory (combined faceted by distance bin)
       if (!is.null(plots[[paste0("trajectory_faceted_combined_", trans_type)]])) {
-        ggsave(file.path(trans_dir, paste0("CrossAnimal_", trans_type, "_Trajectory_Faceted_", window_size, "ep", file_suffix, ".png")),
+        ggsave(file.path(output_dir, paste0("CrossAnimal_", trans_type, "_Trajectory_Faceted_", window_size, "ep.png")),
                plots[[paste0("trajectory_faceted_combined_", trans_type)]],
                width = 12, height = 14, dpi = 300)
       }
       
-      # Event rate
+      # Event rate trajectory (if available)
       if (!is.null(plots[[paste0("event_rate_trajectory_", trans_type)]])) {
-        ggsave(file.path(trans_dir, paste0("CrossAnimal_", trans_type, "_EventRate_Trajectory_", window_size, "ep", file_suffix, ".png")),
+        ggsave(file.path(individual_dir, paste0("CrossAnimal_", trans_type, "_EventRate_Trajectory_", window_size, "ep.png")),
                plots[[paste0("event_rate_trajectory_", trans_type)]],
                width = 10, height = 8, dpi = 300)
       }
     }
     
-    # Individual distance bin plots (cross-animal comparisons)
-    if (!is.null(all_trajectory_dist)) {
-      cat("  Saving individual distance bin plots...\n")
-      distance_bins <- unique(all_trajectory_dist$distance_bin_label)
-      for (trans_type in transition_types) {
-        trans_dir <- get_output_path(output_dir, "between_subject", trans_type)
-        for (dist_bin in distance_bins) {
-          dist_bin_clean <- gsub("-", "", dist_bin)
-          plot_key <- paste0("trajectory_faceted_", trans_type, "_", dist_bin_clean)
-          if (!is.null(plots[[plot_key]])) {
-            ggsave(file.path(trans_dir, paste0("CrossAnimal_", trans_type, "_", dist_bin_clean, "_Trajectory_", window_size, "ep", file_suffix, ".png")),
-                   plots[[plot_key]],
-                   width = 10, height = 8, dpi = 300)
-          }
+    # Save individual animal plots (from distance-binned)
+    cat("  Saving individual animal plots...\n")
+    animals <- unique(all_trajectory_dist$animal)
+    for (trans_type in transition_types) {
+      for (anim in animals) {
+        plot_key <- paste0("trajectory_by_distance_", anim, "_", trans_type)
+        if (!is.null(plots[[plot_key]])) {
+          ggsave(file.path(individual_dir, paste0(anim, "_", trans_type, "_Trajectory_by_Distance_", window_size, "ep.png")),
+                 plots[[plot_key]],
+                 width = 10, height = 8, dpi = 300)
+        }
+      }
+    }
+    
+    # Save individual distance bin plots (from faceted)
+    cat("  Saving individual distance bin plots...\n")
+    distance_bins <- unique(all_trajectory_dist$distance_bin_label)
+    for (trans_type in transition_types) {
+      for (dist_bin in distance_bins) {
+        dist_bin_clean <- gsub("-", "", dist_bin)
+        plot_key <- paste0("trajectory_faceted_", trans_type, "_", dist_bin_clean)
+        if (!is.null(plots[[plot_key]])) {
+          ggsave(file.path(individual_dir, paste0("CrossAnimal_", trans_type, "_", dist_bin_clean, "_Trajectory_", window_size, "ep.png")),
+                 plots[[plot_key]],
+                 width = 10, height = 8, dpi = 300)
         }
       }
     }
@@ -376,46 +390,27 @@ batch_process_animals <- function(animals = ANIMALS,
   if (save_intermediate) {
     cat("Saving combined data tables...\n")
     
-    if (run_whole_window && !is.null(all_event_rates)) {
+    if (run_whole_window) {
       write.csv(all_event_rates,
-                file.path(between_subj_dir, paste0("CrossAnimal_EventRates_All", file_suffix, ".csv")),
+                file.path(output_dir, "CrossAnimal_EventRates_All.csv"),
                 row.names = FALSE)
+      
       write.csv(all_correlations,
-                file.path(between_subj_dir, paste0("CrossAnimal_Correlations_All", file_suffix, ".csv")),
+                file.path(output_dir, "CrossAnimal_Correlations_All.csv"),
                 row.names = FALSE)
+      
       write.csv(all_dist_corr,
-                file.path(between_subj_dir, paste0("CrossAnimal_DistCorr_All", file_suffix, ".csv")),
+                file.path(output_dir, "CrossAnimal_DistCorr_All.csv"),
                 row.names = FALSE)
     }
     
-    if (run_trajectory_analysis && !is.null(all_trajectory_data)) {
+    if (run_trajectory_analysis) {
       write.csv(all_trajectory_data,
-                file.path(between_subj_dir, paste0("CrossAnimal_Trajectory_All", file_suffix, ".csv")),
+                file.path(output_dir, "CrossAnimal_Trajectory_All.csv"),
                 row.names = FALSE)
+      
       write.csv(all_trajectory_dist,
-                file.path(between_subj_dir, paste0("CrossAnimal_Trajectory_Distance_All", file_suffix, ".csv")),
-                row.names = FALSE)
-    }
-    
-    # Save filtering summary
-    if (filter_by_activity) {
-      filter_summary <- do.call(rbind, lapply(names(all_animal_results), function(animal) {
-        stats <- all_animal_results[[animal]]$filter_stats
-        if (!is.null(stats)) {
-          data.frame(
-            animal = animal,
-            total_rois = stats$total_rois,
-            active_rois = stats$active_rois,
-            excluded_rois = stats$excluded_rois,
-            pct_retained = stats$pct_retained,
-            threshold = stats$threshold,
-            min_events = stats$min_events,
-            baseline_epochs = stats$baseline_epochs
-          )
-        }
-      }))
-      write.csv(filter_summary,
-                file.path(between_subj_dir, paste0("CrossAnimal_Filtering_Summary", file_suffix, ".csv")),
+                file.path(output_dir, "CrossAnimal_Trajectory_Distance_All.csv"),
                 row.names = FALSE)
     }
     
@@ -423,45 +418,120 @@ batch_process_animals <- function(animals = ANIMALS,
   }
   
   cat("====================================================\n")
-  cat("  BATCH PROCESSING COMPLETE\n")
-  cat("====================================================\n")
-  cat("Animals processed:", length(all_animal_results), "\n")
-  if (filter_by_activity) {
-    cat("ROI filtering: ENABLED\n")
-    cat("  Threshold:", min_events_baseline, "event(s) per", baseline_epochs, "epochs\n")
-  }
-  cat("Output location:", output_dir, "\n")
+  cat("  BATCH PROCESSING COMPLETE!\n")
   cat("====================================================\n\n")
   
+  # Return everything
   return(list(
-    animal_results = all_animal_results,
+    animals = all_animal_results,
     event_rates = all_event_rates,
     correlations = all_correlations,
     dist_corr = all_dist_corr,
     trajectory_data = all_trajectory_data,
     trajectory_dist = all_trajectory_dist,
-    trajectory_events = all_trajectory_events,
-    plots = plots,
-    config = list(
-      animals = animals,
-      conditions = conditions,
-      transition_types = transition_types,
-      window_size = window_size,
-      filter_by_activity = filter_by_activity,
-      min_events_baseline = min_events_baseline,
-      baseline_epochs = baseline_epochs
-    )
+    plots = plots
   ))
 }
 
-
 # ============================================================
-# PLOTTING FUNCTIONS
+# PLOTTING HELPER FUNCTIONS
 # ============================================================
 
-#' Create trajectory comparison plots (combined + individual per transition type)
+#' Create percentile comparison plot
+create_percentile_plot <- function(data, x_var, y_var, title, x_lab, y_lab, n_points = 100) {
+  
+  # Bin data into percentile groups for smooth lines
+  percentile_bins <- seq(0, 100, length.out = n_points + 1)
+  
+  plot_data <- data %>%
+    mutate(percentile_bin = cut(.data[[x_var]], 
+                                breaks = percentile_bins,
+                                include.lowest = TRUE,
+                                labels = FALSE)) %>%
+    group_by(animal, condition, percentile_bin) %>%
+    summarize(
+      percentile = mean(.data[[x_var]], na.rm = TRUE),
+      metric_value = mean(.data[[y_var]], na.rm = TRUE),
+      .groups = 'drop'
+    )
+  
+  # Create plot
+  p <- ggplot(plot_data, aes(x = percentile, y = metric_value,
+                             color = animal, linetype = condition)) +
+    geom_line(linewidth = 1) +
+    scale_linetype_manual(
+      values = c("BL" = "solid", "SD" = "dashed", "WO" = "dotted"),
+      labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Washout")
+    ) +
+    scale_color_viridis_d(option = "turbo") +
+    labs(
+      title = title,
+      x = x_lab,
+      y = y_lab,
+      color = "Animal",
+      linetype = "Condition"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 16, face = "bold"),
+      axis.title = element_text(size = 12),
+      legend.position = "right",
+      legend.title = element_text(face = "bold")
+    )
+  
+  return(p)
+}
+
+#' Create distance-percentile plot (special handling for distance-correlation data)
+create_distance_percentile_plot <- function(data, title, x_lab, y_lab, n_points = 100) {
+  
+  # Bin data by distance percentile
+  percentile_bins <- seq(0, 100, length.out = n_points + 1)
+  
+  plot_data <- data %>%
+    mutate(percentile_bin = cut(distance_percentile,
+                                breaks = percentile_bins,
+                                include.lowest = TRUE,
+                                labels = FALSE)) %>%
+    group_by(animal, condition, percentile_bin) %>%
+    summarize(
+      distance_percentile = mean(distance_percentile, na.rm = TRUE),
+      mean_correlation = mean(Correlation, na.rm = TRUE),
+      .groups = 'drop'
+    )
+  
+  # Create plot
+  p <- ggplot(plot_data, aes(x = distance_percentile, y = mean_correlation,
+                             color = animal, linetype = condition)) +
+    geom_line(linewidth = 1) +
+    scale_linetype_manual(
+      values = c("BL" = "solid", "SD" = "dashed", "WO" = "dotted"),
+      labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Washout")
+    ) +
+    scale_color_viridis_d(option = "turbo") +
+    labs(
+      title = title,
+      x = x_lab,
+      y = y_lab,
+      color = "Animal",
+      linetype = "Condition"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 16, face = "bold"),
+      axis.title = element_text(size = 12),
+      legend.position = "right",
+      legend.title = element_text(face = "bold")
+    )
+  
+  return(p)
+}
+
+#' Create trajectory comparison plots across animals (with error bars)
+#' Returns both combined faceted plot and individual plots per transition type
 create_trajectory_comparison_plots <- function(data, title_base, window_size) {
   
+  # Compute mean across all ROI pairs per animal/condition/transition/epoch
   plot_data <- data %>%
     group_by(animal, condition, transition_type, epoch_in_window) %>%
     summarise(
@@ -473,12 +543,9 @@ create_trajectory_comparison_plots <- function(data, title_base, window_size) {
   plots <- list()
   transition_types <- unique(plot_data$transition_type)
   
-  # Combined faceted plot
+  # Combined faceted plot (both transition types)
   plots$combined <- ggplot(plot_data, aes(x = epoch_in_window, y = mean_correlation,
                              color = animal, linetype = condition)) +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
-    annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
-             color = "gray40", fontface = "bold", size = 3) +
     geom_errorbar(aes(ymin = mean_correlation - se_correlation,
                       ymax = mean_correlation + se_correlation),
                   width = 0.1, alpha = 0.5, linewidth = 0.5) +
@@ -492,7 +559,7 @@ create_trajectory_comparison_plots <- function(data, title_base, window_size) {
     scale_color_viridis_d(option = "turbo") +
     labs(
       title = title_base,
-      subtitle = paste0("Mean Â± SE pairwise correlation (", window_size, " epoch window)"),
+      subtitle = paste0("Mean ± SE pairwise correlation (", window_size, " epoch window)"),
       x = "Epoch Position Relative to Transition",
       y = "Mean Pairwise Correlation",
       color = "Animal",
@@ -512,11 +579,8 @@ create_trajectory_comparison_plots <- function(data, title_base, window_size) {
   for (trans_type in transition_types) {
     trans_data <- plot_data %>% filter(transition_type == trans_type)
     
-    plots[[trans_type]] <- ggplot(trans_data, aes(x = epoch_in_window, y = mean_correlation,
+    p <- ggplot(trans_data, aes(x = epoch_in_window, y = mean_correlation,
                                color = animal, linetype = condition)) +
-      geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
-      annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
-               color = "gray40", fontface = "bold", size = 3) +
       geom_errorbar(aes(ymin = mean_correlation - se_correlation,
                         ymax = mean_correlation + se_correlation),
                     width = 0.1, alpha = 0.5, linewidth = 0.5) +
@@ -529,7 +593,7 @@ create_trajectory_comparison_plots <- function(data, title_base, window_size) {
       scale_color_viridis_d(option = "turbo") +
       labs(
         title = paste(title_base, "-", trans_type),
-        subtitle = paste0("Mean Â± SE pairwise correlation (", window_size, " epoch window)"),
+        subtitle = paste0("Mean ± SE pairwise correlation (", window_size, " epoch window)"),
         x = "Epoch Position Relative to Transition",
         y = "Mean Pairwise Correlation",
         color = "Animal",
@@ -543,84 +607,18 @@ create_trajectory_comparison_plots <- function(data, title_base, window_size) {
         legend.position = "right",
         legend.title = element_text(face = "bold")
       )
-  }
-  
-  return(plots)
-}
-
-
-#' Create trajectory plots faceted by animal (2x2 layout with SEM ribbons)
-#' For thesis Figure 8: each animal in its own panel, conditions overlaid
-create_trajectory_by_animal_plots <- function(data, title_base, window_size) {
-  
-  plot_data <- data %>%
-    group_by(animal, condition, transition_type, epoch_in_window) %>%
-    summarise(
-      mean_correlation = mean(correlation, na.rm = TRUE),
-      se_correlation = sd(correlation, na.rm = TRUE) / sqrt(n()),
-      .groups = "drop"
-    )
-  
-  plots <- list()
-  transition_types <- unique(plot_data$transition_type)
-  
-  # Condition colors and linetypes
-  condition_colors <- c("BL" = "#2E86AB", "SD" = "#A23B72", "WO" = "#F18F01")
-  condition_linetypes <- c("BL" = "solid", "SD" = "dashed", "WO" = "dotted")
-  condition_labels <- c("BL" = "Baseline", "SD" = "Sleep Dep", "WO" = "Recovery")
-  
-  for (trans_type in transition_types) {
-    trans_data <- plot_data %>% filter(transition_type == trans_type)
     
-    plots[[trans_type]] <- ggplot(trans_data, aes(x = epoch_in_window, y = mean_correlation,
-                               color = condition, fill = condition, linetype = condition)) +
-      geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
-      geom_ribbon(aes(ymin = mean_correlation - se_correlation,
-                      ymax = mean_correlation + se_correlation),
-                  alpha = 0.2, color = NA) +
-      geom_line(linewidth = 1.0) +
-      geom_point(size = 1.8) +
-      facet_wrap(~animal, nrow = 2, ncol = 2, scales = "free_y") +
-      scale_color_manual(values = condition_colors, labels = condition_labels) +
-      scale_fill_manual(values = condition_colors, labels = condition_labels) +
-      scale_linetype_manual(values = condition_linetypes, labels = condition_labels) +
-      labs(
-        title = paste(title_base, "-", trans_type),
-        subtitle = paste0("Mean +/- SEM pairwise correlation (", window_size, " epoch window)"),
-        x = "Epoch Position Relative to Transition",
-        y = "Mean Pairwise Correlation",
-        color = "Condition",
-        fill = "Condition",
-        linetype = "Condition"
-      ) +
-      theme_minimal() +
-      theme(
-        plot.title = element_text(size = 14, face = "bold"),
-        plot.subtitle = element_text(size = 11),
-        axis.title = element_text(size = 11),
-        strip.text = element_text(size = 11, face = "bold"),
-        legend.position = "right",
-        legend.title = element_text(face = "bold"),
-        panel.spacing = unit(1, "lines")
-      )
+    plots[[trans_type]] <- p
   }
   
   return(plots)
 }
 
-
-#' Create distance-binned trajectory comparison plots
+#' Create distance-binned trajectory comparison plots (with error bars)
+#' Returns combined faceted plot AND individual plots per animal/transition type
 create_trajectory_distance_comparison_plots <- function(data, title_base, window_size) {
   
-  # Compute bin ranges for subtitle
-  bin_ranges <- data %>%
-    group_by(distance_bin_label) %>%
-    summarise(bin_min = min(Distance), bin_max = max(Distance), .groups = "drop") %>%
-    arrange(bin_min) %>%
-    mutate(range_str = paste0(distance_bin_label, ": ", round(bin_min), "-", round(bin_max), "px")) %>%
-    pull(range_str)
-  bin_ranges_subtitle <- paste(bin_ranges, collapse = " | ")
-  
+  # Compute mean across transitions per animal/condition/transition_type/distance_bin/epoch
   plot_data <- data %>%
     group_by(animal, condition, transition_type, distance_bin_label, epoch_in_window) %>%
     summarise(
@@ -633,16 +631,13 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
   transition_types <- unique(plot_data$transition_type)
   animals <- unique(plot_data$animal)
   
-  # Combined plots (one per transition type, faceted by animal)
+  # Combined faceted plots (one per transition type, faceted by animal)
   for (trans_type in transition_types) {
     trans_data <- plot_data %>% filter(transition_type == trans_type)
     
     plots[[paste0("combined_", trans_type)]] <- ggplot(trans_data, 
         aes(x = epoch_in_window, y = mean_correlation,
             color = distance_bin_label, linetype = condition)) +
-      geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
-      annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
-               color = "gray40", fontface = "bold", size = 3) +
       geom_errorbar(aes(ymin = mean_correlation - se_correlation,
                         ymax = mean_correlation + se_correlation),
                     width = 0.1, alpha = 0.4, linewidth = 0.4) +
@@ -656,7 +651,7 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
       scale_color_viridis_d(option = "plasma") +
       labs(
         title = paste(title_base, "-", trans_type),
-        subtitle = bin_ranges_subtitle,
+        subtitle = paste0("Mean ± SE by distance bin (", window_size, " epoch window)"),
         x = "Epoch Position Relative to Transition",
         y = "Mean Pairwise Correlation",
         color = "Distance Bin",
@@ -681,12 +676,8 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
       
       if (nrow(subset_data) == 0) next
       
-      plots[[paste0(anim, "_", trans_type)]] <- ggplot(subset_data, 
-          aes(x = epoch_in_window, y = mean_correlation,
-              color = distance_bin_label, linetype = condition)) +
-        geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
-        annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
-                 color = "gray40", fontface = "bold", size = 3) +
+      p <- ggplot(subset_data, aes(x = epoch_in_window, y = mean_correlation,
+                                  color = distance_bin_label, linetype = condition)) +
         geom_errorbar(aes(ymin = mean_correlation - se_correlation,
                           ymax = mean_correlation + se_correlation),
                       width = 0.1, alpha = 0.5, linewidth = 0.5) +
@@ -699,7 +690,7 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
         scale_color_viridis_d(option = "plasma") +
         labs(
           title = paste(anim, "-", trans_type),
-          subtitle = bin_ranges_subtitle,
+          subtitle = paste0("Mean ± SE by distance bin (", window_size, " epoch window)"),
           x = "Epoch Position Relative to Transition",
           y = "Mean Pairwise Correlation",
           color = "Distance Bin",
@@ -713,25 +704,19 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
           legend.position = "right",
           legend.title = element_text(face = "bold")
         )
+      
+      plots[[paste0(anim, "_", trans_type)]] <- p
     }
   }
   
   return(plots)
 }
 
-
-#' Create faceted trajectory plots by distance bin
+#' Create faceted trajectory plots by distance bin (with error bars)
+#' Returns combined faceted plot AND individual plots per distance bin/transition type
 create_trajectory_faceted_plots <- function(data, title_base, window_size) {
   
-  # Compute bin ranges for subtitle
-  bin_ranges <- data %>%
-    group_by(distance_bin_label) %>%
-    summarise(bin_min = min(Distance), bin_max = max(Distance), .groups = "drop") %>%
-    arrange(bin_min) %>%
-    mutate(range_str = paste0(distance_bin_label, ": ", round(bin_min), "-", round(bin_max), "px")) %>%
-    pull(range_str)
-  bin_ranges_subtitle <- paste(bin_ranges, collapse = " | ")
-  
+  # Compute mean per animal/condition/transition_type/distance_bin/epoch
   plot_data <- data %>%
     group_by(animal, condition, transition_type, distance_bin_label, epoch_in_window) %>%
     summarise(
@@ -744,16 +729,13 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
   transition_types <- unique(plot_data$transition_type)
   distance_bins <- unique(plot_data$distance_bin_label)
   
-  # Combined plots (one per transition type, faceted by distance bin)
+  # Combined faceted plots (one per transition type, faceted by distance bin)
   for (trans_type in transition_types) {
     trans_data <- plot_data %>% filter(transition_type == trans_type)
     
     plots[[paste0("combined_", trans_type)]] <- ggplot(trans_data, 
         aes(x = epoch_in_window, y = mean_correlation,
             color = animal, linetype = condition)) +
-      geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
-      annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
-               color = "gray40", fontface = "bold", size = 3) +
       geom_errorbar(aes(ymin = mean_correlation - se_correlation,
                         ymax = mean_correlation + se_correlation),
                     width = 0.1, alpha = 0.4, linewidth = 0.4) +
@@ -767,7 +749,7 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
       scale_color_viridis_d(option = "turbo") +
       labs(
         title = paste(title_base, "-", trans_type),
-        subtitle = bin_ranges_subtitle,
+        subtitle = paste0("Mean ± SE by distance bin (", window_size, " epoch window)"),
         x = "Epoch Position Relative to Transition",
         y = "Mean Pairwise Correlation",
         color = "Animal",
@@ -792,14 +774,8 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
       
       if (nrow(subset_data) == 0) next
       
-      dist_bin_clean <- gsub("-", "", dist_bin)
-      
-      plots[[paste0(trans_type, "_", dist_bin_clean)]] <- ggplot(subset_data, 
-          aes(x = epoch_in_window, y = mean_correlation,
-              color = animal, linetype = condition)) +
-        geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
-        annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
-                 color = "gray40", fontface = "bold", size = 3) +
+      p <- ggplot(subset_data, aes(x = epoch_in_window, y = mean_correlation,
+                                  color = animal, linetype = condition)) +
         geom_errorbar(aes(ymin = mean_correlation - se_correlation,
                           ymax = mean_correlation + se_correlation),
                       width = 0.1, alpha = 0.5, linewidth = 0.5) +
@@ -812,7 +788,7 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
         scale_color_viridis_d(option = "turbo") +
         labs(
           title = paste(trans_type, "-", dist_bin),
-          subtitle = paste0("Mean Â± SE pairwise correlation (", window_size, " epoch window)"),
+          subtitle = paste0("Mean ± SE pairwise correlation (", window_size, " epoch window)"),
           x = "Epoch Position Relative to Transition",
           y = "Mean Pairwise Correlation",
           color = "Animal",
@@ -826,6 +802,10 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
           legend.position = "right",
           legend.title = element_text(face = "bold")
         )
+      
+      # Clean up distance bin name for file naming
+      dist_bin_clean <- gsub("-", "", dist_bin)
+      plots[[paste0(trans_type, "_", dist_bin_clean)]] <- p
     }
   }
   
@@ -833,9 +813,10 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
 }
 
 
-#' Create event rate trajectory plots
+#' Create event rate trajectory plots (one per transition type)
 create_event_rate_trajectory_plots <- function(data, title_base, window_size) {
   
+  # Compute mean event rate per animal/condition/transition_type/epoch
   plot_data <- data %>%
     group_by(animal, condition, transition_type, epoch_in_window) %>%
     summarise(
@@ -844,19 +825,24 @@ create_event_rate_trajectory_plots <- function(data, title_base, window_size) {
       n_transitions = n_distinct(transition_id),
       mean_event_rate = total_events / (n_rois * n_transitions),
       .groups = "drop"
-    )
+    ) %>%
+    # Compute SE across animals for each condition/transition/epoch
+    group_by(condition, transition_type, epoch_in_window) %>%
+    mutate(
+      grand_mean = mean(mean_event_rate, na.rm = TRUE),
+      se_rate = sd(mean_event_rate, na.rm = TRUE) / sqrt(n())
+    ) %>%
+    ungroup()
   
+  # Create separate plot for each transition type
   plots <- list()
   transition_types <- unique(plot_data$transition_type)
   
   for (trans_type in transition_types) {
     trans_data <- plot_data %>% filter(transition_type == trans_type)
     
-    plots[[trans_type]] <- ggplot(trans_data, aes(x = epoch_in_window, y = mean_event_rate,
+    p <- ggplot(trans_data, aes(x = epoch_in_window, y = mean_event_rate,
                                color = animal, linetype = condition)) +
-      geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
-      annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
-               color = "gray40", fontface = "bold", size = 3) +
       geom_line(linewidth = 1.2) +
       geom_point(size = 2.5) +
       scale_linetype_manual(
@@ -880,23 +866,24 @@ create_event_rate_trajectory_plots <- function(data, title_base, window_size) {
         legend.position = "right",
         legend.title = element_text(face = "bold")
       )
+    
+    plots[[trans_type]] <- p
   }
   
   return(plots)
 }
 
-
 # ============================================================
-# AUTO-RUN
+# AUTO-RUN (if sourced in interactive mode)
 # ============================================================
 
 if (interactive()) {
   cat("\n")
   cat("========================================\n")
-  cat("  BATCH PROCESSOR v3 LOADED\n")
-  cat("  (Activity-Filtered Analysis)\n")
+  cat("  BATCH PROCESSOR V2 LOADED\n")
   cat("========================================\n")
   cat("\nTo run batch processing, execute:\n")
   cat("  results <- batch_process_animals()\n\n")
-  cat("Default filter: >=1 event per 18 epochs at BL\n\n")
+  cat("To customize settings, edit the CONFIGURATION section above,\n")
+  cat("or pass parameters to batch_process_animals()\n\n")
 }

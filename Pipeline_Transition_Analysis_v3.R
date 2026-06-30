@@ -17,29 +17,6 @@ if (!exists("analyze_transition_distcorr")) source("Transition_DistCorr_v3.R")
 if (!exists("analyze_transition_event_rates")) source("Transition_EventRate_v3.R")
 
 
-# ============================================================
-# OUTPUT DIRECTORY STRUCTURE
-# ============================================================
-
-#' Create organized output directory structure
-#' 
-#' Structure:
-#'   output_dir/
-#'   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ event/
-#'   Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ Wake2NREM/
-#'   Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ NREM2Wake/
-#'   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ correlation/
-#'   Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ Wake2NREM/
-#'   Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ NREM2Wake/
-#'   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ distance_correlation/
-#'   Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ Wake2NREM/
-#'   Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ NREM2Wake/
-#'   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ within_subject/
-#'   Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ Wake2NREM/
-#'   Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ NREM2Wake/
-#'   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ between_subject/
-#'       Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ Wake2NREM/
-#'       Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ NREM2Wake/
 create_output_directories <- function(output_dir) {
   analysis_types <- c("event", "correlation", "distance_correlation", 
                       "within_subject", "between_subject")
@@ -403,7 +380,183 @@ create_animal_event_rate_plot <- function(trajectory_events, animal_id,
   
   return(p)
 }
+# ============================================================
+# SIMPLIFIED PLOTTING FUNCTIONS - WAKE→NREM FOCUS
+# ============================================================
+# Add these to Pipeline_Transition_Analysis_v3.R
+# After the existing plotting functions (around line 355)
 
+#' Create SIMPLIFIED trajectory plot (BL vs SD only, Wake→NREM default)
+create_animal_trajectory_plot_simplified <- function(trajectory_data, animal_id, window_size, 
+                                                     filter_label = "", 
+                                                     transition_filter = "Wake2NREM") {
+  
+  # Filter to BL and SD only, and one transition type
+  plot_data <- trajectory_data %>%
+    filter(condition %in% c("BL", "SD")) %>%
+    filter(transition_type == transition_filter) %>%
+    group_by(condition, epoch_in_window) %>%
+    summarise(
+      mean_correlation = mean(correlation, na.rm = TRUE),
+      se_correlation = sd(correlation, na.rm = TRUE) / sqrt(n()),
+      n_pairs = n(),
+      .groups = "drop"
+    )
+  
+  p <- ggplot(plot_data, aes(x = epoch_in_window, y = mean_correlation,
+                             color = condition, linetype = condition)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
+    annotate("text", x = 0, y = Inf, label = "Sleep Onset", vjust = 2, hjust = 0.5, 
+             color = "gray40", fontface = "bold", size = 3) +
+    geom_errorbar(aes(ymin = mean_correlation - se_correlation,
+                      ymax = mean_correlation + se_correlation),
+                  width = 0.1, alpha = 0.5, linewidth = 0.5) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 2.5) +
+    scale_color_manual(
+      values = c("BL" = "#2E86AB", "SD" = "#A23B72"),
+      labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation")
+    ) +
+    scale_linetype_manual(
+      values = c("BL" = "solid", "SD" = "dashed"),
+      labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation")
+    ) +
+    labs(
+      title = paste0(animal_id, " - Sleep Onset Transitions", filter_label),
+      subtitle = paste0("Mean ± SE pairwise correlation (", window_size, " epoch window)"),
+      x = "Epoch Position Relative to Sleep Onset",
+      y = "Mean Pairwise Correlation",
+      color = "Condition",
+      linetype = "Condition"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(size = 16, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 13),
+      legend.position = "right",
+      legend.title = element_text(size = 12),
+      legend.text = element_text(size = 11)
+    )
+  
+  return(p)
+}
+
+
+#' Create SIMPLIFIED distance-binned plot (BL only, Wake→NREM default)
+create_animal_trajectory_by_distance_plot_simplified <- function(trajectory_dist, animal_id, 
+                                                                 window_size, filter_label = "",
+                                                                 transition_filter = "Wake2NREM") {
+  
+  # Compute bin ranges for subtitle
+  bin_ranges <- trajectory_dist %>%
+    group_by(distance_bin_label) %>%
+    summarise(bin_min = min(Distance), bin_max = max(Distance), .groups = "drop") %>%
+    arrange(bin_min) %>%
+    mutate(range_str = paste0(distance_bin_label, ": ", round(bin_min), "-", round(bin_max), "px")) %>%
+    pull(range_str)
+  bin_ranges_subtitle <- paste(bin_ranges, collapse = " | ")
+  
+  # Filter to BL only and one transition type
+  plot_data <- trajectory_dist %>%
+    filter(condition == "BL") %>%
+    filter(transition_type == transition_filter) %>%
+    group_by(distance_bin_label, epoch_in_window) %>%
+    summarise(
+      mean_correlation = mean(correlation, na.rm = TRUE),
+      se_correlation = sd(correlation, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
+    )
+  
+  p <- ggplot(plot_data, 
+              aes(x = epoch_in_window, y = mean_correlation,
+                  color = distance_bin_label)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
+    annotate("text", x = 0, y = Inf, label = "Sleep Onset", vjust = 2, hjust = 0.5, 
+             color = "gray40", fontface = "bold", size = 3) +
+    geom_errorbar(aes(ymin = mean_correlation - se_correlation,
+                      ymax = mean_correlation + se_correlation),
+                  width = 0.1, alpha = 0.4, linewidth = 0.4) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 2.5) +
+    scale_color_viridis_d(option = "plasma") +
+    labs(
+      title = paste0(animal_id, " - Sleep Onset - Baseline", filter_label),
+      subtitle = bin_ranges_subtitle,
+      x = "Epoch Position Relative to Sleep Onset",
+      y = "Mean Pairwise Correlation",
+      color = "Distance Bin"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(size = 16, face = "bold"),
+      plot.subtitle = element_text(size = 11),
+      axis.title = element_text(size = 13),
+      legend.position = "right",
+      legend.title = element_text(size = 12)
+    )
+  
+  return(p)
+}
+
+
+#' Create SIMPLIFIED event rate plot (BL vs SD only, Wake→NREM default)
+create_animal_event_rate_plot_simplified <- function(trajectory_events, animal_id, 
+                                                     window_size, filter_label = "",
+                                                     transition_filter = "Wake2NREM") {
+  
+  if (is.null(trajectory_events) || nrow(trajectory_events) == 0) {
+    return(NULL)
+  }
+  
+  # Filter to BL and SD only, and one transition type
+  plot_data <- trajectory_events %>%
+    filter(condition %in% c("BL", "SD")) %>%
+    filter(transition_type == transition_filter) %>%
+    group_by(condition, epoch_in_window) %>%
+    summarise(
+      total_events = n(),
+      n_rois = n_distinct(Cell_Name),
+      n_transitions = n_distinct(transition_id),
+      mean_event_rate = total_events / (n_rois * n_transitions),
+      .groups = "drop"
+    )
+  
+  p <- ggplot(plot_data, 
+              aes(x = epoch_in_window, y = mean_event_rate,
+                  color = condition, linetype = condition)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
+    annotate("text", x = 0, y = Inf, label = "Sleep Onset", vjust = 2, hjust = 0.5, 
+             color = "gray40", fontface = "bold", size = 3) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 2.5) +
+    scale_color_manual(
+      values = c("BL" = "#2E86AB", "SD" = "#A23B72"),
+      labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation")
+    ) +
+    scale_linetype_manual(
+      values = c("BL" = "solid", "SD" = "dashed"),
+      labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation")
+    ) +
+    labs(
+      title = paste0(animal_id, " - Sleep Onset Transitions", filter_label),
+      subtitle = paste0("Mean events per ROI per transition (", window_size, " epoch window)"),
+      x = "Epoch Position Relative to Sleep Onset",
+      y = "Mean Event Rate",
+      color = "Condition",
+      linetype = "Condition"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(size = 16, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 13),
+      legend.position = "right",
+      legend.title = element_text(size = 12)
+    )
+  
+  return(p)
+}
 
 # ============================================================
 # CORRELATION-BASED PAIR FILTERING

@@ -24,19 +24,17 @@ Author: Delaney's Analysis Pipeline
 # USER CONFIGURATION - SET YOUR DEFAULTS HERE
 # =============================================================================
 
-# data path for reference: r'E:\Data_Processing\R\Data CSVs\
-
 # File paths (set to None to require command-line input)
-TRACES_FILE = r'E:\Data_Processing\R\Data CSVs\mPFCf5_BL_Traces.csv'          # e.g., 'mPFCf5_BL_Traces.csv'
-EVENTS_FILE = r'E:\Data_Processing\R\Data CSVs\mPFCf5_BL_Events.csv'         # e.g., 'mPFCf5_BL_Events.csv'
-STATES_FILE = r'E:\Data_Processing\R\Data CSVs\mPFCf5_BL_states_df.csv'          # e.g., 'mPFCf5_BL_states_df.csv'
-OUTPUT_FILE = None          # e.g., 'output.png' (None = display only)
+TRACES_FILE = r"E:\Data_Processing\R\Data CSVs\mPFCf5_BL_Traces.csv"          # e.g., 'mPFCf5_BL_Traces.csv'
+EVENTS_FILE = r"E:\Data_Processing\R\Data CSVs\mPFCf5_BL_Events.csv"          # e.g., 'mPFCf5_BL_Events.csv'
+STATES_FILE = r"E:\Data_Processing\R\Data CSVs\mPFCf5_BL_states_df.csv"          # e.g., 'mPFCf5_BL_states_df.csv'
+OUTPUT_FILE = r"E:\Data_Processing\Python\CorrExample.png"        # e.g., 'output.png' (None = display only)
 
 # ROI selection: list of ROI names, or 'all'
-ROI_LIST = ['C33', 'C02', 'C60']            # e.g., ['C00', 'C01', 'C02'] or 'all'
+ROI_LIST = ['C60','C02','C33']            # e.g., ['C00', 'C01', 'C02'] or 'all'
 
 # Epoch selection: list of epoch indices, or 'all'
-EPOCH_LIST = [18, 19, 20, 21]          # e.g., [0, 1, 2, 3, 4] or list(range(0, 10)) or 'all'
+EPOCH_LIST = [18,19,20,21]          # e.g., [0, 1, 2, 3, 4] or list(range(0, 10)) or 'all'
 
 # Epoch duration in seconds
 EPOCH_DURATION = 10
@@ -338,14 +336,27 @@ def plot_traces(traces_df, roi_list, time_range=None,
             ]
             
             if len(roi_events) > 0:
-                # Find y-values at event times (interpolate)
-                event_y = np.interp(roi_events['Time'], 
-                                    plot_df['Time'], 
-                                    plot_df[roi]) + y_offset
+                # Find peak after each event (look ahead ~0.5s for the maximum)
+                peak_window = 0.5  # seconds to look ahead for peak
+                event_times = []
+                event_peaks = []
                 
-                ax.scatter(roi_events['Time'], event_y,
-                          marker='^', s=50, facecolors='white', edgecolors='black',
-                          linewidths=1.5, zorder=3)
+                for _, ev in roi_events.iterrows():
+                    ev_time = ev['Time']
+                    # Find trace values in window after event
+                    mask = (plot_df['Time'] >= ev_time) & (plot_df['Time'] <= ev_time + peak_window)
+                    if mask.any():
+                        window_data = plot_df.loc[mask, ['Time', roi]]
+                        peak_idx = window_data[roi].idxmax()
+                        peak_time = window_data.loc[peak_idx, 'Time']
+                        peak_val = window_data.loc[peak_idx, roi] + y_offset
+                        event_times.append(peak_time)
+                        event_peaks.append(peak_val)
+                
+                if event_times:
+                    ax.scatter(event_times, event_peaks,
+                              marker='v', s=50, facecolors='white', edgecolors='black',
+                              linewidths=1.5, zorder=3)
     
     # Add separator lines between traces
     if len(y_offsets) > 1:
@@ -354,9 +365,14 @@ def plot_traces(traces_df, roi_list, time_range=None,
             ax.axhline(y=separator_y, color='#505050', linestyle='-', 
                        linewidth=0.7, alpha=0.9, zorder=1)
     
+    # Add separator line above scale bar row
+    scale_separator_y = -offset * 0.5
+    ax.axhline(y=scale_separator_y, color='#505050', linestyle='-', 
+               linewidth=0.7, alpha=0.9, zorder=1)
+    
     # Formatting
     ax.set_xlabel('Time (s)', fontsize=12)
-    ax.set_ylabel('ROI', fontsize=12)
+    ax.set_ylabel('ROI (ΔF/F)', fontsize=12)
     ax.set_yticks(yticks)
     ax.set_yticklabels(ytick_labels)
     ax.set_xlim(time_min, time_max)
@@ -365,6 +381,50 @@ def plot_traces(traces_df, roi_list, time_range=None,
     for spine in ax.spines.values():
         spine.set_linewidth(1.5)
     ax.tick_params(width=1.5, length=5)
+    
+    # Add ΔF/F scale bar
+    # Calculate a nice round scale bar value based on actual trace fluctuations (not offsets)
+    all_values = plot_df[roi_list].values.flatten()
+    data_range = np.nanmax(all_values) - np.nanmin(all_values)
+    
+    # Pick a nice round number for scale bar
+    nice_values = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
+    scale_val = nice_values[0]
+    for nv in nice_values:
+        if nv <= data_range * 0.5:
+            scale_val = nv
+    
+    # Reserve bottom row for scale bar (one offset unit below the traces)
+    x_pos = time_min
+    y_pos = -offset * 1.0  # One full row below C00
+    
+    # Scale the bar height to be visible
+    bar_height = scale_val
+    
+    ax.plot([x_pos, x_pos], [y_pos, y_pos + bar_height], 
+            color='black', linewidth=5, solid_capstyle='butt')
+    
+    # Add dashed horizontal reference lines at scale bar heights for ALL rows (traces + scale bar)
+    # For each trace row
+    for y_off in y_offsets:
+        ax.axhline(y=y_off, color='black', linestyle='--', linewidth=0.8, alpha=0.4, zorder=1)
+        ax.axhline(y=y_off + bar_height, color='black', linestyle='--', linewidth=0.8, alpha=0.4, zorder=1)
+    
+    # For scale bar row
+    ax.axhline(y=y_pos, color='black', linestyle='--', linewidth=0.8, alpha=0.4, zorder=1)
+    ax.axhline(y=y_pos + bar_height, color='black', linestyle='--', linewidth=0.8, alpha=0.4, zorder=1)
+    
+    # Format scale bar label
+    if scale_val >= 0.01:
+        scale_label = f'{int(scale_val*100)}% ΔF/F'
+    else:
+        scale_label = f'{scale_val*100:.1f}% ΔF/F'
+    
+    ax.text(x_pos + (time_max - time_min) * 0.01, y_pos + bar_height/2, 
+            scale_label, fontsize=10, fontweight='bold', ha='left', va='center')
+    
+    # Set y-axis limits to include scale bar row
+    ax.set_ylim(y_pos - offset * 0.3, max(y_offsets) + offset * 0.5)
     
     if title:
         ax.set_title(title, fontsize=14)
@@ -378,7 +438,7 @@ def plot_traces(traces_df, roi_list, time_range=None,
         ]
         
         if show_events and events_df is not None:
-            legend_patches.append(plt.Line2D([0], [0], marker='^', color='w', 
+            legend_patches.append(plt.Line2D([0], [0], marker='v', color='w', 
                                              markerfacecolor='white', markeredgecolor='black',
                                              markersize=8, markeredgewidth=1.5,
                                              label='Events'))

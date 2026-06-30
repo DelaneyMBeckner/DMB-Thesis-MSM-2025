@@ -233,52 +233,69 @@ cat("Ratio:", median(viral_snr) / median(transgenic_snr), "\n")
 # VISUALIZATION
 # =============================================================================
 
-animal_colors <- c("mPFCf5" = "#1b9e77", "mPFCf6" = "#d95f02", 
-                   "mPFCm4" = "#e41a1c", "mPFCm9" = "#7570b3")
+animal_labels <- c("mPFCm4" = "Male 1", "mPFCm9" = "Male 2",
+                   "mPFCf5" = "Female 1", "mPFCf6" = "Female 2")
 
-p1 <- ggplot(valid_results, aes(x = animal, y = snr, fill = animal)) +
+animal_colors <- c("Male 1"   = "#D92B2B",
+                   "Male 2"   = "#D4A017",
+                   "Female 1" = "#7B2D8E",
+                   "Female 2" = "#1B9E77")
+
+animal_levels <- c("Male 1", "Male 2", "Female 1", "Female 2")
+
+valid_results <- valid_results %>%
+  mutate(animal_label = factor(animal_labels[animal], levels = animal_levels))
+
+theme_snr <- theme_minimal() +
+  theme(
+    plot.title          = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.title.position = "plot",
+    axis.title          = element_text(size = 13, face = "bold"),
+    axis.text           = element_text(size = 12, face = "bold", color = "#111111"),
+    legend.title        = element_text(size = 12, face = "bold"),
+    legend.text         = element_text(size = 14),
+    panel.grid.major.y = element_line(color = "#444444", linewidth = 0.4, linetype = "dashed"),
+    panel.grid.major.x = element_line(color = "#bbbbbb", linewidth = 0.4, linetype = "solid"),
+    panel.grid.minor.y = element_line(color = "#2B2B2B", linewidth = 0.2, linetype = "dashed"),
+    panel.grid.minor.x = element_line(color = "#cccccc", linewidth = 0.2, linetype = "solid"),
+    legend.position     = "none"
+  )
+
+p1 <- ggplot(valid_results, aes(x = animal_label, y = snr, fill = animal_label)) +
+  stat_boxplot(geom = "errorbar", width = 0.25, linewidth = 0.8) +
   geom_boxplot(outlier.shape = NA, alpha = 0.7) +
   geom_jitter(width = 0.2, alpha = 0.4, size = 1) +
   scale_fill_manual(values = animal_colors) +
   labs(title = "Signal-to-Noise Ratio by Animal",
        x = "Animal", y = "SNR") +
-  theme_minimal() +
-  theme(plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
-        plot.title.position = "plot",
-        legend.position = "none")
+  theme_snr
 
-p2 <- ggplot(valid_results, aes(x = animal, y = baseline_sd, fill = animal)) +
+p2 <- ggplot(valid_results, aes(x = animal_label, y = baseline_sd, fill = animal_label)) +
+  stat_boxplot(geom = "errorbar", width = 0.25, linewidth = 0.8) +
   geom_boxplot(outlier.shape = NA, alpha = 0.7) +
   geom_jitter(width = 0.2, alpha = 0.4, size = 1) +
   scale_fill_manual(values = animal_colors) +
   labs(title = "Baseline Noise by Animal",
        x = "Animal", y = "Std Dev Outside Events (ΔF/F)") +
-  theme_minimal() +
-  theme(plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
-        plot.title.position = "plot",
-        legend.position = "none")
+  theme_snr
 
-p3 <- ggplot(valid_results, aes(x = animal, y = mean_amplitude, fill = animal)) +
+p3 <- ggplot(valid_results, aes(x = animal_label, y = mean_amplitude, fill = animal_label)) +
+  stat_boxplot(geom = "errorbar", width = 0.25, linewidth = 0.8) +
   geom_boxplot(outlier.shape = NA, alpha = 0.7) +
   geom_jitter(width = 0.2, alpha = 0.4, size = 1) +
   scale_fill_manual(values = animal_colors) +
   labs(title = "Mean Event Amplitude by Animal",
        x = "Animal", y = "Mean ΔF/F at Events") +
-  theme_minimal() +
-  theme(plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
-        plot.title.position = "plot",
-        legend.position = "none")
+  theme_snr
 
 p4 <- ggplot(valid_results, aes(x = expression_type, y = snr, fill = expression_type)) +
+  stat_boxplot(geom = "errorbar", width = 0.25, linewidth = 0.8) +
   geom_boxplot(outlier.shape = NA, alpha = 0.7) +
   geom_jitter(width = 0.2, alpha = 0.4, size = 1) +
   scale_fill_manual(values = c("viral" = "#e41a1c", "transgenic" = "#377eb8")) +
   labs(title = "SNR: Viral vs Transgenic Expression",
        x = "Expression Method", y = "SNR") +
-  theme_minimal() +
-  theme(plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
-        plot.title.position = "plot",
-        legend.position = "none")
+  theme_snr
 
 print(p1)
 print(p2)

@@ -66,10 +66,38 @@ CORRELATION_FILTER_METHOD <- "percentile"  # "percentile" or "outlier"
 CORRELATION_PERCENTILE <- 5       # Top X% (only used if method = "percentile")
 
 # File naming
-FILE_SUFFIX <- "_all_simple"         # Suffix for output files
+FILE_SUFFIX <- "_all_simple_new"         # Suffix for output files
 
 # Plotting options
 N_PERCENTILE_POINTS <- 100
+
+# ============================================================
+# PLOT AESTHETICS
+# ============================================================
+
+ANIMAL_COLORS <- c(
+  "mPFCf5" = "#60BBA0",  # Female 1
+  "mPFCf6" = "#E48F4E",  # Female 2
+  "mPFCm4" = "#EC5F61",  # Male 1
+  "mPFCm9" = "#9F9BCA"   # Male 2
+)
+ANIMAL_LABELS <- c(
+  "mPFCf5" = "Female 1",
+  "mPFCf6" = "Female 2",
+  "mPFCm4" = "Male 1",
+  "mPFCm9" = "Male 2"
+)
+ANIMAL_LABELLER <- as_labeller(ANIMAL_LABELS)
+
+CONDITION_COLORS <- c(
+  "BL" = "#2E86AB",  # Baseline
+  "SD" = "#A23B72",  # Sleep Deprivation
+  "WO" = "#E69F00"   # Recovery
+)
+CONDITION_LINETYPES <- c("BL" = "solid", "SD" = "dashed", "WO" = "dotted")
+CONDITION_LABELS    <- c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Recovery")
+
+DISTANCE_BIN_COLORS <- c("Close" = "#3A0557", "Medium" = "#185FA5", "Far" = "#0F6E56")
 
 # ============================================================
 # MAIN BATCH PROCESSING FUNCTION
@@ -289,6 +317,15 @@ batch_process_animals <- function(animals = ANIMALS,
       for (trans_type in names(event_rate_plots)) {
         plots[[paste0("event_rate_trajectory_", trans_type)]] <- event_rate_plots[[trans_type]]
       }
+      
+      event_rate_by_animal_plots <- create_event_rate_by_animal_plots(
+        data = all_trajectory_events,
+        title_base = paste0("Event Rate Trajectory Across Animals", filter_label),
+        window_size = window_size
+      )
+      for (trans_type in names(event_rate_by_animal_plots)) {
+        plots[[paste0("event_rate_by_animal_", trans_type)]] <- event_rate_by_animal_plots[[trans_type]]
+      }
     }
   }
   
@@ -347,6 +384,13 @@ batch_process_animals <- function(animals = ANIMALS,
       if (!is.null(plots[[paste0("event_rate_trajectory_", trans_type)]])) {
         ggsave(file.path(trans_dir, paste0("CrossAnimal_", trans_type, "_EventRate_Trajectory_", window_size, "ep", file_suffix, ".png")),
                plots[[paste0("event_rate_trajectory_", trans_type)]],
+               width = 10, height = 8, dpi = 300)
+      }
+      
+      # Event rate faceted by animal (2x2 layout)
+      if (!is.null(plots[[paste0("event_rate_by_animal_", trans_type)]])) {
+        ggsave(file.path(trans_dir, paste0("CrossAnimal_", trans_type, "_EventRate_ByAnimal_2x2_", window_size, "ep", file_suffix, ".png")),
+               plots[[paste0("event_rate_by_animal_", trans_type)]],
                width = 10, height = 8, dpi = 300)
       }
     }
@@ -479,20 +523,18 @@ create_trajectory_comparison_plots <- function(data, title_base, window_size) {
     geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
     annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
              color = "gray40", fontface = "bold", size = 3) +
-    geom_errorbar(aes(ymin = mean_correlation - se_correlation,
-                      ymax = mean_correlation + se_correlation),
-                  width = 0.1, alpha = 0.5, linewidth = 0.5) +
+    geom_ribbon(aes(ymin = mean_correlation - se_correlation,
+                    ymax = mean_correlation + se_correlation,
+                    fill = animal), alpha = 0.4, color = NA) +
     geom_line(linewidth = 1.2) +
     geom_point(size = 2.5) +
     facet_wrap(~transition_type, ncol = 2, scales = "free_y") +
-    scale_linetype_manual(
-      values = c("BL" = "solid", "SD" = "dashed", "WO" = "dotted"),
-      labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Washout")
-    ) +
-    scale_color_viridis_d(option = "turbo") +
+    scale_linetype_manual(values = CONDITION_LINETYPES, labels = CONDITION_LABELS) +
+    scale_color_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS) +
+    scale_fill_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS, guide = "none") +
     labs(
       title = title_base,
-      subtitle = paste0("Mean Â± SE pairwise correlation (", window_size, " epoch window)"),
+      subtitle = paste0("Mean ± SE pairwise correlation (", window_size, " epoch window)"),
       x = "Epoch Position Relative to Transition",
       y = "Mean Pairwise Correlation",
       color = "Animal",
@@ -517,19 +559,17 @@ create_trajectory_comparison_plots <- function(data, title_base, window_size) {
       geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
       annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
                color = "gray40", fontface = "bold", size = 3) +
-      geom_errorbar(aes(ymin = mean_correlation - se_correlation,
-                        ymax = mean_correlation + se_correlation),
-                    width = 0.1, alpha = 0.5, linewidth = 0.5) +
+      geom_ribbon(aes(ymin = mean_correlation - se_correlation,
+                      ymax = mean_correlation + se_correlation,
+                      fill = animal), alpha = 0.4, color = NA) +
       geom_line(linewidth = 1.2) +
       geom_point(size = 2.5) +
-      scale_linetype_manual(
-        values = c("BL" = "solid", "SD" = "dashed", "WO" = "dotted"),
-        labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Washout")
-      ) +
-      scale_color_viridis_d(option = "turbo") +
+      scale_linetype_manual(values = CONDITION_LINETYPES, labels = CONDITION_LABELS) +
+      scale_color_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS) +
+      scale_fill_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS, guide = "none") +
       labs(
         title = paste(title_base, "-", trans_type),
-        subtitle = paste0("Mean Â± SE pairwise correlation (", window_size, " epoch window)"),
+        subtitle = paste0("Mean ± SE pairwise correlation (", window_size, " epoch window)"),
         x = "Epoch Position Relative to Transition",
         y = "Mean Pairwise Correlation",
         color = "Animal",
@@ -565,9 +605,9 @@ create_trajectory_by_animal_plots <- function(data, title_base, window_size) {
   transition_types <- unique(plot_data$transition_type)
   
   # Condition colors and linetypes
-  condition_colors <- c("BL" = "#2E86AB", "SD" = "#A23B72", "WO" = "#F18F01")
-  condition_linetypes <- c("BL" = "solid", "SD" = "dashed", "WO" = "dotted")
-  condition_labels <- c("BL" = "Baseline", "SD" = "Sleep Dep", "WO" = "Recovery")
+  condition_colors    <- CONDITION_COLORS
+  condition_linetypes <- CONDITION_LINETYPES
+  condition_labels    <- CONDITION_LABELS
   
   for (trans_type in transition_types) {
     trans_data <- plot_data %>% filter(transition_type == trans_type)
@@ -580,13 +620,14 @@ create_trajectory_by_animal_plots <- function(data, title_base, window_size) {
                   alpha = 0.2, color = NA) +
       geom_line(linewidth = 1.0) +
       geom_point(size = 1.8) +
-      facet_wrap(~animal, nrow = 2, ncol = 2, scales = "free_y") +
+      facet_wrap(~animal, nrow = 2, ncol = 2, scales = "free_y",
+                 labeller = ANIMAL_LABELLER) +
       scale_color_manual(values = condition_colors, labels = condition_labels) +
       scale_fill_manual(values = condition_colors, labels = condition_labels) +
       scale_linetype_manual(values = condition_linetypes, labels = condition_labels) +
       labs(
         title = paste(title_base, "-", trans_type),
-        subtitle = paste0("Mean +/- SEM pairwise correlation (", window_size, " epoch window)"),
+        subtitle = paste0("Mean ± SEM pairwise correlation (", window_size, " epoch window)"),
         x = "Epoch Position Relative to Transition",
         y = "Mean Pairwise Correlation",
         color = "Condition",
@@ -613,13 +654,13 @@ create_trajectory_by_animal_plots <- function(data, title_base, window_size) {
 create_trajectory_distance_comparison_plots <- function(data, title_base, window_size) {
   
   # Compute bin ranges for subtitle
-  bin_ranges <- data %>%
-    group_by(distance_bin_label) %>%
-    summarise(bin_min = min(Distance), bin_max = max(Distance), .groups = "drop") %>%
-    arrange(bin_min) %>%
-    mutate(range_str = paste0(distance_bin_label, ": ", round(bin_min), "-", round(bin_max), "px")) %>%
-    pull(range_str)
-  bin_ranges_subtitle <- paste(bin_ranges, collapse = " | ")
+  #bin_ranges <- data %>%
+    #group_by(distance_bin_label) %>%
+    #summarise(bin_min = min(Distance), bin_max = max(Distance), .groups = "drop") %>%
+    #arrange(bin_min) %>%
+    #mutate(range_str = paste0(distance_bin_label, ": ", round(bin_min), "-", round(bin_max), "px")) %>%
+    #pull(range_str)
+  #bin_ranges_subtitle <- paste(bin_ranges, collapse = " | ")
   
   plot_data <- data %>%
     group_by(animal, condition, transition_type, distance_bin_label, epoch_in_window) %>%
@@ -643,20 +684,19 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
       geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
       annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
                color = "gray40", fontface = "bold", size = 3) +
-      geom_errorbar(aes(ymin = mean_correlation - se_correlation,
-                        ymax = mean_correlation + se_correlation),
-                    width = 0.1, alpha = 0.4, linewidth = 0.4) +
+      geom_ribbon(aes(ymin = mean_correlation - se_correlation,
+                      ymax = mean_correlation + se_correlation,
+                      fill = distance_bin_label), alpha = 0.4, color = NA) +
       geom_line(linewidth = 1.0) +
       geom_point(size = 1.5) +
-      facet_wrap(~animal, ncol = 2, scales = "free_y") +
-      scale_linetype_manual(
-        values = c("BL" = "solid", "SD" = "dashed", "WO" = "dotted"),
-        labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Washout")
-      ) +
-      scale_color_viridis_d(option = "plasma") +
+      facet_wrap(~animal, ncol = 2, scales = "free_y",
+                 labeller = ANIMAL_LABELLER) +
+      scale_linetype_manual(values = CONDITION_LINETYPES, labels = CONDITION_LABELS) +
+      scale_color_manual(values = DISTANCE_BIN_COLORS) +
+      scale_fill_manual(values = DISTANCE_BIN_COLORS, guide = "none") +
       labs(
         title = paste(title_base, "-", trans_type),
-        subtitle = bin_ranges_subtitle,
+        #subtitle = bin_ranges_subtitle,
         x = "Epoch Position Relative to Transition",
         y = "Mean Pairwise Correlation",
         color = "Distance Bin",
@@ -665,7 +705,7 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
       theme_minimal() +
       theme(
         plot.title = element_text(size = 16, face = "bold"),
-        plot.subtitle = element_text(size = 11),
+        #plot.subtitle = element_text(size = 11),
         axis.title = element_text(size = 11),
         strip.text = element_text(size = 10, face = "bold"),
         legend.position = "right",
@@ -687,19 +727,17 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
         geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
         annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
                  color = "gray40", fontface = "bold", size = 3) +
-        geom_errorbar(aes(ymin = mean_correlation - se_correlation,
-                          ymax = mean_correlation + se_correlation),
-                      width = 0.1, alpha = 0.5, linewidth = 0.5) +
+        geom_ribbon(aes(ymin = mean_correlation - se_correlation,
+                        ymax = mean_correlation + se_correlation,
+                        fill = distance_bin_label), alpha = 0.4, color = NA) +
         geom_line(linewidth = 1.2) +
         geom_point(size = 2.5) +
-        scale_linetype_manual(
-          values = c("BL" = "solid", "SD" = "dashed", "WO" = "dotted"),
-          labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Washout")
-        ) +
-        scale_color_viridis_d(option = "plasma") +
+        scale_linetype_manual(values = CONDITION_LINETYPES, labels = CONDITION_LABELS) +
+        scale_color_manual(values = DISTANCE_BIN_COLORS) +
+        scale_fill_manual(values = DISTANCE_BIN_COLORS, guide = "none") +
         labs(
-          title = paste(anim, "-", trans_type),
-          subtitle = bin_ranges_subtitle,
+          title = paste(ANIMAL_LABELS[anim], "-", trans_type),
+          #subtitle = bin_ranges_subtitle,
           x = "Epoch Position Relative to Transition",
           y = "Mean Pairwise Correlation",
           color = "Distance Bin",
@@ -708,7 +746,7 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
         theme_minimal() +
         theme(
           plot.title = element_text(size = 16, face = "bold"),
-          plot.subtitle = element_text(size = 12),
+          #plot.subtitle = element_text(size = 12),
           axis.title = element_text(size = 12),
           legend.position = "right",
           legend.title = element_text(face = "bold")
@@ -724,13 +762,13 @@ create_trajectory_distance_comparison_plots <- function(data, title_base, window
 create_trajectory_faceted_plots <- function(data, title_base, window_size) {
   
   # Compute bin ranges for subtitle
-  bin_ranges <- data %>%
-    group_by(distance_bin_label) %>%
-    summarise(bin_min = min(Distance), bin_max = max(Distance), .groups = "drop") %>%
-    arrange(bin_min) %>%
-    mutate(range_str = paste0(distance_bin_label, ": ", round(bin_min), "-", round(bin_max), "px")) %>%
-    pull(range_str)
-  bin_ranges_subtitle <- paste(bin_ranges, collapse = " | ")
+  #bin_ranges <- data %>%
+    #group_by(distance_bin_label) %>%
+    #summarise(bin_min = min(Distance), bin_max = max(Distance), .groups = "drop") %>%
+    #arrange(bin_min) %>%
+    #mutate(range_str = paste0(distance_bin_label, ": ", round(bin_min), "-", round(bin_max), "px")) %>%
+    #pull(range_str)
+  #bin_ranges_subtitle <- paste(bin_ranges, collapse = " | ")
   
   plot_data <- data %>%
     group_by(animal, condition, transition_type, distance_bin_label, epoch_in_window) %>%
@@ -754,20 +792,18 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
       geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
       annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
                color = "gray40", fontface = "bold", size = 3) +
-      geom_errorbar(aes(ymin = mean_correlation - se_correlation,
-                        ymax = mean_correlation + se_correlation),
-                    width = 0.1, alpha = 0.4, linewidth = 0.4) +
+      geom_ribbon(aes(ymin = mean_correlation - se_correlation,
+                      ymax = mean_correlation + se_correlation,
+                      fill = animal), alpha = 0.4, color = NA) +
       geom_line(linewidth = 0.9) +
       geom_point(size = 1.5) +
       facet_wrap(~distance_bin_label, ncol = 2, scales = "free_y") +
-      scale_linetype_manual(
-        values = c("BL" = "solid", "SD" = "dashed", "WO" = "dotted"),
-        labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Washout")
-      ) +
-      scale_color_viridis_d(option = "turbo") +
+      scale_linetype_manual(values = CONDITION_LINETYPES, labels = CONDITION_LABELS) +
+      scale_color_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS) +
+      scale_fill_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS, guide = "none") +
       labs(
         title = paste(title_base, "-", trans_type),
-        subtitle = bin_ranges_subtitle,
+        #subtitle = bin_ranges_subtitle,
         x = "Epoch Position Relative to Transition",
         y = "Mean Pairwise Correlation",
         color = "Animal",
@@ -776,7 +812,7 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
       theme_minimal() +
       theme(
         plot.title = element_text(size = 16, face = "bold"),
-        plot.subtitle = element_text(size = 11),
+        #plot.subtitle = element_text(size = 11),
         axis.title = element_text(size = 11),
         strip.text = element_text(size = 9, face = "bold"),
         legend.position = "right",
@@ -800,19 +836,17 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
         geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
         annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
                  color = "gray40", fontface = "bold", size = 3) +
-        geom_errorbar(aes(ymin = mean_correlation - se_correlation,
-                          ymax = mean_correlation + se_correlation),
-                      width = 0.1, alpha = 0.5, linewidth = 0.5) +
+        geom_ribbon(aes(ymin = mean_correlation - se_correlation,
+                        ymax = mean_correlation + se_correlation,
+                        fill = animal), alpha = 0.4, color = NA) +
         geom_line(linewidth = 1.2) +
         geom_point(size = 2.5) +
-        scale_linetype_manual(
-          values = c("BL" = "solid", "SD" = "dashed", "WO" = "dotted"),
-          labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Washout")
-        ) +
-        scale_color_viridis_d(option = "turbo") +
+        scale_linetype_manual(values = CONDITION_LINETYPES, labels = CONDITION_LABELS) +
+        scale_color_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS) +
+        scale_fill_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS, guide = "none") +
         labs(
           title = paste(trans_type, "-", dist_bin),
-          subtitle = paste0("Mean Â± SE pairwise correlation (", window_size, " epoch window)"),
+          subtitle = paste0("Mean ± SE pairwise correlation (", window_size, " epoch window)"),
           x = "Epoch Position Relative to Transition",
           y = "Mean Pairwise Correlation",
           color = "Animal",
@@ -836,13 +870,17 @@ create_trajectory_faceted_plots <- function(data, title_base, window_size) {
 #' Create event rate trajectory plots
 create_event_rate_trajectory_plots <- function(data, title_base, window_size) {
   
+  # Compute per-transition event rate first, then mean +/- SE across transitions
   plot_data <- data %>%
+    group_by(animal, condition, transition_type, epoch_in_window, transition_id) %>%
+    summarise(
+      transition_event_rate = n() / n_distinct(Cell_Name),
+      .groups = "drop"
+    ) %>%
     group_by(animal, condition, transition_type, epoch_in_window) %>%
     summarise(
-      total_events = n(),
-      n_rois = n_distinct(Cell_Name),
-      n_transitions = n_distinct(transition_id),
-      mean_event_rate = total_events / (n_rois * n_transitions),
+      mean_event_rate = mean(transition_event_rate, na.rm = TRUE),
+      se_event_rate   = sd(transition_event_rate, na.rm = TRUE) / sqrt(n()),
       .groups = "drop"
     )
   
@@ -857,19 +895,79 @@ create_event_rate_trajectory_plots <- function(data, title_base, window_size) {
       geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
       annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5, 
                color = "gray40", fontface = "bold", size = 3) +
+      geom_ribbon(aes(ymin = mean_event_rate - se_event_rate,
+                      ymax = mean_event_rate + se_event_rate,
+                      fill = animal), alpha = 0.4, color = NA) +
       geom_line(linewidth = 1.2) +
       geom_point(size = 2.5) +
-      scale_linetype_manual(
-        values = c("BL" = "solid", "SD" = "dashed", "WO" = "dotted"),
-        labels = c("BL" = "Baseline", "SD" = "Sleep Deprivation", "WO" = "Washout")
-      ) +
-      scale_color_viridis_d(option = "turbo") +
+      scale_linetype_manual(values = CONDITION_LINETYPES, labels = CONDITION_LABELS) +
+      scale_color_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS) +
+      scale_fill_manual(values = ANIMAL_COLORS, labels = ANIMAL_LABELS, guide = "none") +
       labs(
         title = paste(title_base, "-", trans_type),
         subtitle = paste0("Mean events per ROI per transition (", window_size, " epoch window)"),
         x = "Epoch Position Relative to Transition",
         y = "Mean Event Rate",
         color = "Animal",
+        linetype = "Condition"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 16, face = "bold"),
+        plot.subtitle = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        legend.position = "right",
+        legend.title = element_text(face = "bold")
+      )
+  }
+  
+  return(plots)
+}
+
+
+#' Create event rate trajectory plots faceted by animal (2x2 layout)
+create_event_rate_by_animal_plots <- function(data, title_base, window_size) {
+  
+  plot_data <- data %>%
+    group_by(animal, condition, transition_type, epoch_in_window, transition_id) %>%
+    summarise(
+      transition_event_rate = n() / n_distinct(Cell_Name),
+      .groups = "drop"
+    ) %>%
+    group_by(animal, condition, transition_type, epoch_in_window) %>%
+    summarise(
+      mean_event_rate = mean(transition_event_rate, na.rm = TRUE),
+      se_event_rate   = sd(transition_event_rate, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
+    )
+  
+  plots <- list()
+  transition_types <- unique(plot_data$transition_type)
+  
+  for (trans_type in transition_types) {
+    trans_data <- plot_data %>% filter(transition_type == trans_type)
+    
+    plots[[trans_type]] <- ggplot(trans_data, aes(x = epoch_in_window, y = mean_event_rate,
+                               color = condition, linetype = condition)) +
+      geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.8) +
+      annotate("text", x = 0, y = Inf, label = "T0", vjust = 2, hjust = 0.5,
+               color = "gray40", fontface = "bold", size = 3) +
+      geom_ribbon(aes(ymin = mean_event_rate - se_event_rate,
+                      ymax = mean_event_rate + se_event_rate,
+                      fill = condition), alpha = 0.4, color = NA) +
+      geom_line(linewidth = 1.2) +
+      geom_point(size = 2.5) +
+      facet_wrap(~animal, nrow = 2, ncol = 2, scales = "free_y",
+                 labeller = ANIMAL_LABELLER) +
+      scale_color_manual(values = CONDITION_COLORS, labels = CONDITION_LABELS) +
+      scale_fill_manual(values = CONDITION_COLORS, labels = CONDITION_LABELS, guide = "none") +
+      scale_linetype_manual(values = CONDITION_LINETYPES, labels = CONDITION_LABELS) +
+      labs(
+        title = paste(title_base, "-", trans_type, "- By Animal"),
+        subtitle = paste0("Mean ± SE events per ROI per transition (", window_size, " epoch window)"),
+        x = "Epoch Position Relative to Transition",
+        y = "Mean Event Rate",
+        color = "Condition",
         linetype = "Condition"
       ) +
       theme_minimal() +
